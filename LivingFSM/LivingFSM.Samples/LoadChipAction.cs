@@ -116,6 +116,4 @@ namespace LivingFSM
         {
         }
     }
-
-#endregion Solid
 }
