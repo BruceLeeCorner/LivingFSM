@@ -37,7 +37,7 @@ namespace LivingFSM
         public override StepResult Steps()
         {
             RoutineStart();
-            Step(StepId.Go2ScanPoint, () =>
+            ExecuteAndWait(StepId.Go2ScanPoint, () =>
             {
                 _loadMachine.Go(100);
                 return true;
@@ -54,7 +54,7 @@ namespace LivingFSM
                 return true;
             });
 
-            Step(StepId.Go2PickPoint, () =>
+            ExecuteAndWait(StepId.Go2PickPoint, () =>
             {
                 _loadMachine.Go(200);
                 return true;
@@ -65,7 +65,7 @@ namespace LivingFSM
 
             Wait(StepId.IsChipTaken, () => _loadMachine.IsChipExist());
             Delay(StepId.Delay300ms, 300);
-            Step(StepId.Back2ReadyPoint, () =>
+            ExecuteAndWait(StepId.Back2ReadyPoint, () =>
             {
                 _loadMachine.Go(0);
                 return true;

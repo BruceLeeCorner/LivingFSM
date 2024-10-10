@@ -5,19 +5,19 @@ namespace LivingFSM
     public class CountdownTimer
     {
         private readonly Stopwatch _stopWatch;
-        private int _value;
+        private int _target;
 
-        public CountdownTimer(int value)
+        public CountdownTimer(int targetMS)
         {
-            _value = value;
+            _target = targetMS;
             _stopWatch = Stopwatch.StartNew();
         }
 
-        public bool IsTimeOut => _stopWatch.Elapsed.TotalMilliseconds >= _value;
+        public bool IsTimeOut => _stopWatch.Elapsed.TotalMilliseconds >= _target;
 
-        public void Restart(int value)
+        public void Restart(int targetMS)
         {
-            _value = value;
+            _target = targetMS;
             _stopWatch.Restart();
         }
     }

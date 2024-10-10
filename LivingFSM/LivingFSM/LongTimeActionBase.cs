@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 
 namespace LivingFSM
 {
@@ -50,17 +51,173 @@ namespace LivingFSM
 
         public event Action CannotAction;
 
-        public void OnCannotAction()
+        internal void OnCannotAction()
         {
             CannotAction?.Invoke();
+        }
+
+        public event Action ActionFinished;
+
+        internal void OnActionFinished()
+        {
+            ActionFinished?.Invoke();
         }
 
         protected object[] Args { get; private set; }
 
         public abstract StepResult Steps();
 
+        #region Delay
+
+        public void ExecuteAndDelay(Enum id, Action func, int milliseconds)
+        {
+            ExecuteAndWait(id,
+            () =>
+            {
+                _countdownTimer.Restart(milliseconds);
+                func.Invoke();
+            },
+            () => _countdownTimer.IsTimeOut
+            );
+        }
+
+        public void Delay(Enum id, int milliseconds)
+        {
+            ExecuteAndDelay(id, null, milliseconds);
+        }
+
+        #endregion Delay
+
+        #region Execute
+
+        public void Execute(Enum id, Action execution)
+        {
+            ExecuteAndWait(id, execution, (Func<(bool success, string errorMsg, bool reach)>)null, -1);
+        }
+
+        public void Execute(Enum id, Func<(bool success, string errorMsg)> execution)
+        {
+            ExecuteAndWait(id, execution, (Func<(bool success, string errorMsg, bool reach)>)null, -1);
+        }
+
+        #endregion Execute
+
+        #region Wait
+
+        public void Wait(Enum id, Func<bool> condition, int waitTimeoutMS = -1)
+        {
+            ExecuteAndWait(id, null, condition, waitTimeoutMS);
+        }
+
+        public void Wait(Enum id, Func<(bool success, string errorMsg, bool reach)> condition, int waitTimeoutMS = -1)
+        {
+            ExecuteAndWait(id, null, condition, waitTimeoutMS);
+        }
+
+        #endregion Wait
+
+        #region ExecuteAndWait
+
+        public void ExecuteAndWait(Enum id, Action execution, Func<bool> condition, int waitTimeoutMS = -1)
+        {
+            ExecuteAndWait(id, () =>
+            {
+                execution();
+                return (true, null);
+            }, () =>
+            {
+                return (true, null, condition());
+            },
+            waitTimeoutMS);
+        }
+
+        public void ExecuteAndWait(Enum id, Action execution, Func<(bool success, string errorMsg, bool reach)> condition, int waitTimeoutMS = -1)
+        {
+            ExecuteAndWait(id, () =>
+            {
+                execution();
+                return (true, null);
+            }, condition, waitTimeoutMS);
+        }
+
+        public void ExecuteAndWait(Enum id, Func<(bool success, string errorMsg)> func, Func<bool> condition, int waitTimeoutMS = -1)
+        {
+            ExecuteAndWait(id, func, () =>
+            {
+                return (true, null, condition());
+            }, waitTimeoutMS);
+        }
+
+        public void ExecuteAndWait(Enum id, Func<(bool success, string errorMsg)> func, Func<(bool success, string errorMsg, bool reach)> condition, int waitTimeoutMS = -1)
+        {
+            PrepareStep(id);
+
+            if (_waitingCondition == false)
+            {
+                try
+                {
+                    var ret = func.Invoke();
+                    if (!ret.success)
+                    {
+                        StepResultToken = new StepResult(Result.Failed, ret.errorMsg);
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    StepResultToken = new StepResult(Result.Failed, ex.ToString());
+                    return;
+                }
+
+                if (waitTimeoutMS > 0)
+                {
+                    _countdownTimer.Restart(waitTimeoutMS);
+                }
+
+                if (condition == null)
+                {
+                    NextStep();
+                }
+
+                if (func != null)
+                {
+                    StepResultToken = StepResult.Forward;
+                    return;
+                }
+                _waitingCondition = true;
+            }
+
+            (bool success, string errorMsg, bool reach) = condition();
+
+            if (!success)
+            {
+                StepResultToken = new StepResult(Result.Failed, errorMsg);
+                return;
+            }
+
+            if (reach)
+            {
+                NextStep();
+                StepResultToken = StepResult.Forward;
+                return;
+            }
+
+            if (waitTimeoutMS > 0)
+            {
+                if (_countdownTimer.IsTimeOut)
+                {
+                    StepResultToken = new StepResult(Result.Failed, "Wait condition timeout");
+                    return;
+                }
+            }
+
+            StepResultToken = StepResult.Forward;
+        }
+
+        #endregion ExecuteAndWait
+
         /// <summary>
-        /// 用于高定制Action执行结果，以及启动另一个LongTimeAction
+        /// 用于高定制Action执行结果，以及启动另一个LongTimeAction,如果需要定制StepResultParameter,需要使用此方法。
         /// </summary>
         /// <param name="id"></param>
         /// <param name="action"></param>
@@ -70,57 +227,6 @@ namespace LivingFSM
             StepResultToken = action.Invoke();
             if (StepResultToken.Result == Result.Forward)
                 NextStep();
-        }
-
-        public void Execute(Enum id, Func<bool> func)
-        {
-            Step(id, func, () => (true, true));
-        }
-
-        public void Wait(Enum id, Func<bool> check) => Step(id, () => true, () => (true, check()));
-
-        public void Delay(Enum id, int milliseconds)
-        {
-            ExecuteAndDelay(id, () => true, milliseconds);
-        }
-
-        public void ExecuteAndDelay(Enum id, Func<bool> func, int milliseconds)
-        {
-            Step(id,
-            () =>
-            {
-                _countdownTimer.Restart(milliseconds);
-                return func.Invoke();
-            },
-            () => (true, _countdownTimer.IsTimeOut)
-            );
-        }
-
-        public void Step(Enum id, Func<bool> func, Func<(bool success, bool reach)> check)
-        {
-            PrepareStep(id);
-
-            if (_waitingCondition == false)
-            {
-                if (!func.Invoke())
-                {
-                    StepResultToken = StepResult.Failed;
-                    return;
-                }
-                _waitingCondition = true;
-            }
-
-            (bool success, bool reach) = check();
-            if (!success)
-            {
-                StepResultToken = StepResult.Failed;
-                return;
-            }
-            if (reach)
-            {
-                StepResultToken = StepResult.Forward;
-                NextStep();
-            }
         }
 
         public void Step(Enum id, LongTimeActionBase longTimeActionBase)
