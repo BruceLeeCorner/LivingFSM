@@ -5,6 +5,6 @@
         Same,
         Any,
         Remain,
-        Unknown
+        Pangu
     }
 }

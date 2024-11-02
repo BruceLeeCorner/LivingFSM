@@ -6,11 +6,12 @@ using System.Threading;
 
 namespace LivingFSM
 {
-    public class StateMachine : IStateMachine, ITransitionTable, IStateTracker
+    public class StateMachine : IStateMachine
     {
         private CancellationTokenSource _cancellationTokenSource;
 
         private Enum _currState;
+        private ManualResetEventSlim _pauseEvent;
 
         private LinkedList<Enum> _historyStates = new LinkedList<Enum>();
 
@@ -18,17 +19,30 @@ namespace LivingFSM
 
         private BlockingCollection<(Enum msgCmmd, object[] args)> _msgQueue;
 
-        private bool _pauseFlag;
-
         private Dictionary<string, List<(Enum msgCmd, Func<object[], bool> action, Enum nextState)>> _transitionTable;
 
         private int interval = 100;
-
-        public StateMachine()
+        public int Interval
         {
+            get => interval;
+            set
+            {
+                interval = value;
+            }
+        }
+
+        public StateMachine() : this(FsmState.Pangu)
+        {
+
+        }
+
+        public StateMachine(Enum initialState)
+        {
+            _currState = initialState;
             _transitionTable = new Dictionary<string, List<(Enum msg, Func<object[], bool> action, Enum nextState)>>();
             _msgQueue = new BlockingCollection<(Enum msgCmd, object[] msgArgs)>();
-            Loop();
+            _pauseEvent = new ManualResetEventSlim(true);
+            new Thread(Loop).Start();
         }
 
         public event EventHandler<StateTransitedEventArgs> MsgNotMatchAnyState;
@@ -36,98 +50,25 @@ namespace LivingFSM
         public event EventHandler<StateTransitedEventArgs> StateEntered;
 
         public event EventHandler<StateTransitedEventArgs> StateExited;
-        Enum IStateTracker.CurrState => throw new NotImplementedException();
 
-        //    return Result.Forward;
-        //}
-        int IStateTracker.HistoryStateCapacity => throw new NotImplementedException();
+        #region IStateTracker
+        Enum IStateMachine.CurrState => _currState;
+        Enum IStateMachine.PrevState => ((IStateMachine)this).GetState(1);
+        int IStateMachine.HistoryStateCapacity => throw new NotImplementedException();
+        Enum IStateMachine.GetState(int prevIndex)
+        {
+            return _historyStates.ElementAt(prevIndex);
+        }
+        #endregion
 
-        //    Result ret = Result.Finished;
-        //    var lst = _longTimeActions.ToList();
-        //    for (int i = 0; i < lst.Count; i++)
-        //    {
-        //        ret = lst[i].Start();
-        //        if (ret == Result.Finished)
-        //        {
-        //            _longTimeActions.Dequeue();
-        //            continue;
-        //        }
-        //        else
-        //        {
-        //            break;
-        //        }
-        //    }
-        Enum IStateTracker.PrevState { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
-
-        //public Result StartAction()
-        //{
-        //    if (_longTimeActions.Count == 0)
-        //        return Result.Finished;
         public object Tag { get; set; }
 
-        protected Queue<LongTimeActionBase> QueueActions
+        bool IStateMachine.CanMatch(Enum msgCmd)
         {
-            get { return _longTimeActions; }
+            return ((IStateMachine)this).CanMatch(msgCmd, _currState);
         }
 
-        public void AbortAction()
-        {
-            _longTimeActions.Peek().Abort(null);
-            _longTimeActions.Clear();
-        }
-
-        //public Result MonitorAction()
-        //{
-        //    if (_longTimeActions.Count == 0)
-        //        return Result.Finished;
-
-        //    LongTimeActionBase routine = _longTimeActions.Peek();
-
-        //    var ret = routine.Steps();
-        //    if (ret.Result == Result.Finished)
-        //    {
-        //        _longTimeActions.Dequeue();
-
-        //        var lst = _longTimeActions.ToList();
-        //        for (int i = 0; i < lst.Count; i++)
-        //        {
-        //            ret = lst[i].Start();
-        //            if (ret == Result.Finished)
-        //            {
-        //                _longTimeActions.Dequeue();
-        //                continue;
-        //            }
-        //            else
-        //            {
-        //                break;
-        //            }
-        //        }
-        //    }
-
-        //    return ret;
-        //}
-
-        //public Result StartAction(LongTimeActionBase action, params object[] args)
-        //{
-        //    QueueActions.Clear();
-
-        //    QueueActions.Enqueue(action);
-
-        //    return QueueActions.Peek().Start(args);
-        //}
-
-        //public Result StartAction(LongTimeActionBase action)
-        //{
-        //    QueueActions.Clear();
-
-        //    QueueActions.Enqueue(action);
-
-        bool ITransitionTable.CanMatch(Enum msgCmd)
-        {
-            return ((ITransitionTable)this).CanMatch(msgCmd, _currState);
-        }
-
-        bool ITransitionTable.CanMatch(Enum msgCmd, Enum state)
+        bool IStateMachine.CanMatch(Enum msgCmd, Enum state)
         {
             var anyHashCode = FsmState.Any.GetHashStringCode();
             if (_transitionTable.ContainsKey(anyHashCode) && _transitionTable[anyHashCode].Any(item => item.msgCmd.IsSame(msgCmd)))
@@ -138,7 +79,7 @@ namespace LivingFSM
             return false;
         }
 
-        bool ITransitionTable.CanMatch(Enum msgCmd, Enum state, out Func<object[], bool> action, out Enum nextState)
+        bool IStateMachine.CanMatch(Enum msgCmd, Enum state, out Func<object[], bool> action, out Enum nextState)
         {
             action = default;
             nextState = default;
@@ -168,19 +109,18 @@ namespace LivingFSM
             return false;
         }
 
-        bool ITransitionTable.CanMatch(Enum msgCmd, out Func<object[], bool> action, out Enum nextState) => ((ITransitionTable)this).CanMatch(msgCmd, _currState, out action, out nextState);
+        bool IStateMachine.CanMatch(Enum msgCmd, out Func<object[], bool> action, out Enum nextState) => ((IStateMachine)this).CanMatch(msgCmd, _currState, out action, out nextState);
 
-        //    return QueueActions.Peek().Start();
-        //}
-        public void Continue()
+        public void Resume()
         {
-            _pauseFlag = true;
             _cancellationTokenSource = new CancellationTokenSource();
+            _pauseEvent.Set();
         }
 
-        Enum IStateTracker.GetState(int prevIndex)
+        public void Pause()
         {
-            return _historyStates.ElementAt(prevIndex);
+            _pauseEvent.Reset();
+            _cancellationTokenSource.Cancel();
         }
 
         public void PostMsg(Enum msgCmd, params object[] args)
@@ -244,16 +184,19 @@ namespace LivingFSM
 
         private void Loop()
         {
-            while (_pauseFlag)
+            while (true)
             {
-                var success = _msgQueue.TryTake(out (Enum cmd, object[] args) msg, interval, _cancellationTokenSource.Token);
+                _pauseEvent.Wait(); // 暂停机制
+                bool success; (Enum cmd, object[] args) msg;
+                try { success = _msgQueue.TryTake(out msg, interval, _cancellationTokenSource.Token); }
+                catch (OperationCanceledException) { continue; }
 
-                if (!success)
+                if (success == false)
                 {
                     msg = (FsmMsgCmd.Timer, null);
                 }
                 // 不管当前是什么状态，全部忽略之，强制执行switch default 对应的逻辑，并强制切换到指定状态。换句话说，任何状态都要处理此消息，执行action后，跳转到指定的状态。
-                var match = ((ITransitionTable)this).CanMatch(msg.cmd, out Func<object[], bool> action, out Enum nextState);
+                var match = ((IStateMachine)this).CanMatch(msg.cmd, out Func<object[], bool> action, out Enum nextState);
                 // 当前状态不接受此消息
                 if (!match)
                 {
