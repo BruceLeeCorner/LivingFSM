@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace LivingFSM.Samples
+namespace LivingObject
 {
-    public interface IScript : IModular
+    public interface IObjectWrapper : IScript, ICache
     {
 
     }

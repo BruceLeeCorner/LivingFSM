@@ -4,11 +4,13 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace LivingFSM.Samples
+namespace LivingObject
 {
     public interface IModular
     {
-        public string Module { get; set; }
-        public string Name { get; set; }
+        string Module { get; }
+        string Group { get; }
+        string Name { get; }
+        string Id { get; }
     }
 }
